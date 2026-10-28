@@ -31,7 +31,7 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
         # First test: use  --render --max-scrolls 5 --limit 5  then remove those two options
-        run: python scrape_faymas.py --render --max-scrolls 5 --limit 5
+        run: python scrape_faymas.py --render 
 
       - name: Commit results
         if: always()                      # save partial progress even if the scrape was cut off
