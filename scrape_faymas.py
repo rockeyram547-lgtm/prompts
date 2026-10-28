@@ -93,16 +93,26 @@ class Fetcher:
     def html(self, url):
         time.sleep(self.delay)
         if self.render:
+            page = None
             try:
-                self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                # a fresh tab per page avoids a stuck/broken tab breaking every later page
+                page = self._browser.new_page(user_agent=HEADERS["User-Agent"])
+                resp = page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                if resp is not None and resp.status >= 400:
+                    print(f"    HTTP {resp.status} for {url}")
+                    return None
                 try:
-                    self.page.wait_for_selector("h1", timeout=15000)
+                    page.wait_for_selector("h1", timeout=15000)
                 except Exception:
                     pass
-                self.page.wait_for_timeout(1000)
-                return self.page.content()
-            except Exception:
+                page.wait_for_timeout(1000)
+                return page.content()
+            except Exception as e:
+                print(f"    browser error: {str(e).splitlines()[0][:200]}")
                 return None
+            finally:
+                if page:
+                    page.close()
         r = http_get(self.session, url)
         return r.text if r else None
 
