@@ -74,15 +74,21 @@ class Fetcher:
 
     def __init__(self, render=False, delay=1.0):
         self.session = requests.Session()
-        self.render = render
+        self.render = False
         self.delay = delay
         self.page = None
         if render:
-            from playwright.sync_api import sync_playwright
+            self.enable_render()
 
-            self._pw = sync_playwright().start()
-            self._browser = self._pw.chromium.launch()
-            self.page = self._browser.new_page(user_agent=HEADERS["User-Agent"])
+    def enable_render(self):
+        if self.render:
+            return
+        from playwright.sync_api import sync_playwright
+
+        self._pw = sync_playwright().start()
+        self._browser = self._pw.chromium.launch()
+        self.page = self._browser.new_page(user_agent=HEADERS["User-Agent"])
+        self.render = True
 
     def html(self, url):
         time.sleep(self.delay)
@@ -135,6 +141,11 @@ def urls_from_sitemap(session, url, seen):
 
 def discover_via_sitemap(fetcher):
     session = fetcher.session
+    try:
+        probe = session.get(BASE + "/sitemap.xml", headers=HEADERS, timeout=30)
+        print(f"  /sitemap.xml -> HTTP {probe.status_code}, {len(probe.text)} bytes")
+    except requests.RequestException as e:
+        print(f"  /sitemap.xml -> request failed: {e}")
     candidates = [BASE + "/sitemap.xml", BASE + "/sitemap_index.xml"]
     r = http_get(session, BASE + "/robots.txt")
     if r:
@@ -150,7 +161,8 @@ def discover_via_sitemap(fetcher):
 def discover_via_crawl(fetcher, start_urls):
     """Scroll the homepage / category pages in a real browser and collect /prompt/ links."""
     if not fetcher.render:
-        sys.exit("Crawling needs a browser. Install Playwright and rerun with --render.")
+        print("Starting a headless browser for crawling (run `playwright install chromium` if this fails)...")
+        fetcher.enable_render()
     page = fetcher.page
     found, queue, visited = {}, list(start_urls), set()
     cat_re = re.compile(r"/(category|categories)/[^/?#]+$")
