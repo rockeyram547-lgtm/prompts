@@ -94,7 +94,12 @@ class Fetcher:
         time.sleep(self.delay)
         if self.render:
             try:
-                self.page.goto(url, wait_until="networkidle", timeout=45000)
+                self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                try:
+                    self.page.wait_for_selector("h1", timeout=15000)
+                except Exception:
+                    pass
+                self.page.wait_for_timeout(1000)
                 return self.page.content()
             except Exception:
                 return None
@@ -158,7 +163,7 @@ def discover_via_sitemap(fetcher):
     return list(dict.fromkeys(urls))
 
 
-def discover_via_crawl(fetcher, start_urls):
+def discover_via_crawl(fetcher, start_urls, max_scrolls=1500):
     """Scroll the homepage / category pages in a real browser and collect /prompt/ links."""
     if not fetcher.render:
         print("Starting a headless browser for crawling (run `playwright install chromium` if this fails)...")
@@ -173,11 +178,13 @@ def discover_via_crawl(fetcher, start_urls):
         visited.add(start)
         print(f"  crawling {start}")
         try:
-            page.goto(start, wait_until="networkidle", timeout=45000)
-        except Exception:
+            page.goto(start, wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(3000)
+        except Exception as e:
+            print(f"  could not open {start}: {e}")
             continue
         last, stable = 0, 0
-        for _ in range(300):
+        for n in range(1, max_scrolls + 1):
             hrefs = page.eval_on_selector_all("a[href]", "els => els.map(e => e.href)")
             for h in hrefs:
                 h = norm_url(h)
@@ -190,10 +197,13 @@ def discover_via_crawl(fetcher, start_urls):
                 page.get_by_role("button", name=re.compile("load more|show more", re.I)).first.click(timeout=500)
             except Exception:
                 pass
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(1500)
             stable = stable + 1 if len(found) == last else 0
             last = len(found)
-            if stable >= 4:
+            if n % 10 == 0 or n == 1:
+                print(f"    scroll {n}/{max_scrolls}: {len(found)} prompt links found so far")
+            if stable >= 6:
+                print(f"    no new prompts after {stable} scrolls, done with this page")
                 break
     return list(found)
 
@@ -205,7 +215,7 @@ def discover(fetcher, args):
         print(f"Sitemap: {len(urls)} prompt URLs")
     if not urls:
         print("No sitemap results, crawling the site instead...")
-        urls = discover_via_crawl(fetcher, args.start_url or [BASE])
+        urls = discover_via_crawl(fetcher, args.start_url or [BASE], args.max_scrolls)
         print(f"Crawl: {len(urls)} prompt URLs")
     return urls
 
@@ -488,6 +498,7 @@ def main():
     ap.add_argument("--crawl", action="store_true", help="skip the sitemap and crawl pages (needs --render)")
     ap.add_argument("--start-url", action="append", help="extra page to crawl (repeatable)")
     ap.add_argument("--delay", type=float, default=1.0, help="seconds between requests (default 1.0)")
+    ap.add_argument("--max-scrolls", type=int, default=1500, help="max scroll steps per page when crawling (default 1500)")
     ap.add_argument("--limit", type=int, default=0, help="max new prompts to scrape this run")
     ap.add_argument("--build-only", action="store_true", help="only rebuild CSVs from the cache")
     ap.add_argument("--group-by", choices=["main4", "site"], default="main4",
@@ -495,6 +506,7 @@ def main():
     ap.add_argument("--flatten", action="store_true", help="collapse line breaks in prompts to single spaces")
     ap.add_argument("--inspect", metavar="URL", help="parse one prompt page and save its HTML for debugging")
     args = ap.parse_args()
+    sys.stdout.reconfigure(line_buffering=True)
 
     if args.inspect:
         inspect(args)
